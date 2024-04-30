@@ -1,0 +1,103 @@
+base_gnn:
+  input_dim: 512
+  hidden_dim: 1024
+  output_dim: 2
+  n_hidden: 1
+  epochs: 2000
+  early_stopping: 500
+  lr: 1e-5
+  weight_decay: 0.001
+  dropout: 0.5
+  batch_size: 32
+  num_workers: 4
+  n_neigh_train: 16
+  n_neigh_full: 16
+  lbl_train_frac: 0.6
+  sample: false
+  loss: "nll"
+  best_model_metric: "best_val"
+  dataset: "CrisisMMD"
+  imageft: "maxvit"
+  textft: "mpnet"
+  fusion: "early"
+  pca_red: 256
+  group: gnn
+
+base_mlp:
+  input_dim: 512
+  hidden_dim: 1024
+  output_dim: 2
+  n_hidden: 1
+  epochs: 2000
+  early_stopping: 500
+  lr: 1e-5
+  weight_decay: 0.001
+  dropout: 0.5
+  batch_size: 32
+  num_workers: 4
+  lbl_train_frac: 0.6
+  sample: false
+  loss: "nll"
+  best_model_metric: "best_val"
+  imageft: "maxvit"
+  textft: "mpnet"
+  fusion: "early"
+  pca_red: 256
+  group: mlp
+
+base_ae:
+  input_dim: 512
+  hidden_dim: [256]
+  norm: true
+  dropout: 0.5
+  epochs: 2000
+
+base_gnn_al:
+  input_dim: 512
+  hidden_dim: 1024
+  output_dim: 2
+  n_hidden: 1
+  epochs: 1000
+  lr: 1e-5
+  weight_decay: 0.001
+  dropout: 0.5
+  batch_size: 32
+  num_workers: 4
+  n_neigh_train: 16
+  n_neigh_full: 16
+  lbl_train_frac: 0.6
+  sample: false
+  loss: "nll"
+  best_model_metric: "best_val"
+  dataset: "CrisisMMD"
+  imageft: "maxvit"
+  textft: "mpnet"
+  fusion: "early"
+  pca_red: 256
+  group: gnn
+
+bayesian_gnn:
+  input_dim: 512
+  hidden_dim: 1024
+  output_dim: 2
+  n_hidden: 1
+  epochs: 100
+  lr: 1e-5
+  weight_decay: 0.001
+  dropout: 0.5
+  batch_size: 32
+  num_workers: 4
+  n_neigh_train: 16
+  n_neigh_full: 16
+  lbl_train_frac: 0.6
+  sample: false
+  loss: "nll"
+  best_model_metric: "best_val"
+  dataset: "CrisisMMD"
+  imageft: "maxvit"
+  textft: "mpnet"
+  fusion: "early"
+  pca_red: 256
+  group: gnn
+  num_test_inference_run: 10
+  num_inference_run: 100
