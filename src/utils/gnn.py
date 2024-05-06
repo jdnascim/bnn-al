@@ -1,5 +1,7 @@
 import copy
 import json
+import os
+import pickle
 import statistics
 import numpy as np
 from sklearn.metrics import confusion_matrix
@@ -11,12 +13,198 @@ import tqdm
 import torch.nn.functional as F
 import seaborn as sns
 import matplotlib.pyplot as plt
-import yaml
 import math
+import pandas as pd
+from torch_geometric.utils import degree
 
-from src.utils.utils import custom_serializer, get_f1, get_normalized_acc
+from src.feature_extraction.feature_extraction import mpnet_features, maxvit_features
+from src.utils.utils import check_and_convert_to_tensor, custom_serializer, data_split, get_f1, get_normalized_acc, process_dataframe
+from src.utils.constants import AL_SPLIT_SET, DEV_SET, GRAPH_CACHE, TRAIN_SET
+from src.utils.reduction import autoencoder_reduction
 
-def generate_graph(emb, lbl, n_neighbors, **kwargs):
+
+def highest_degree_unlbl_nodes(pyg_graph, k):
+
+    assert 1 <= pyg_graph.x[pyg_graph.unlbl_mask].shape[0], "k smaller than 1"
+    assert k <= pyg_graph.x[pyg_graph.unlbl_mask].shape[0], "k bigger than unlabeled set size"
+
+    # Calculate the degree of each node
+    deg = degree(pyg_graph.edge_index[0], num_nodes=pyg_graph.num_nodes)
+
+    # Consider only the unlabeled_set
+    deg = deg[pyg_graph.unlbl_mask]
+    original_index = torch.argwhere(pyg_graph.unlbl_mask == True)
+
+    # Sort nodes based on their degree
+    sorted_nodes = torch.argsort(deg, descending=True)
+
+    # Select the top k nodes
+    top_k_nodes = original_index[sorted_nodes[:k]].squeeze()
+
+    return top_k_nodes
+
+    
+
+
+def graph_edges(emb, n_neighbors):
+
+    if torch.is_tensor(emb) is True:
+        device = emb.device
+        emb = emb.detach().cpu().numpy()
+    
+    simm = cosine_similarity(emb)
+    emb = torch.Tensor(emb).to(device)
+
+    simm[np.arange(simm.shape[0]),np.arange(simm.shape[0])] = 0
+    
+    edges = set()        
+    for i, vec in enumerate(simm):
+        partit = np.argpartition(vec, -1*n_neighbors)
+        for j in range(n_neighbors):
+            edges.add((i, partit[-1 * j]))
+            edges.add((partit[-1 * j], i))
+        
+    edges = torch.Tensor(list(edges)).t().type(torch.int64)
+    
+    return edges
+    
+
+def generate_graph(**kwargs):
+    event = kwargs.get("event")
+    dev_id = kwargs.get("device")
+    reduction = kwargs.get("reduction")
+    al_isel = kwargs.get("al_isel")
+    labeled_size = kwargs.get("labeled_size")
+    set_id = kwargs.get("set_id")
+    cache = kwargs.get("use_cache")
+
+    filepath = GRAPH_CACHE.format(event, reduction, al_isel, labeled_size, set_id)
+
+    if os.path.exists(filepath) and cache:
+        with open(filepath, 'rb') as fp:
+            pyg_graph_train, pyg_graph_dev = pickle.load(fp)
+
+            return pyg_graph_train, pyg_graph_dev
+
+    n_neigh_train = kwargs.get("n_neigh_train")
+    n_neigh_full = kwargs.get("n_neigh_full")
+
+    if dev_id is not None:
+        device = torch.device('cuda:{}'.format(dev_id) if torch.cuda.is_available() else 'cpu')
+    else:
+        device = 'cpu'
+    
+    [df_text_train, df_text_dev, _] = mpnet_features(dev_id, event)
+    [df_image_train, df_image_dev, _] = maxvit_features(dev_id, event)
+    
+    
+    data_train = pd.read_json(TRAIN_SET.format(event), lines=True)
+    ft_images_train, ft_text_train, annot_train = process_dataframe(data_train,
+                                                    df_image_train,
+                                                    df_text_train)
+    
+    # dev
+    data_dev = pd.read_json(DEV_SET.format(event), lines=True)
+    ft_dev_images, ft_dev_text, annot_dev = process_dataframe(data_dev, df_image_dev, df_text_dev)
+    
+    if reduction == "autoenc":
+        autoenc = kwargs.get("autoenc")
+
+        ft_train_images, ft_dev_images = autoencoder_reduction(autoenc,
+                                                                ft_images_train,
+                                                                ft_dev_images,
+                                                                device,
+                                                                "maxvit",
+                                                                event)
+        
+        ft_train_text, ft_dev_text = autoencoder_reduction(autoenc,
+                                                            ft_text_train,
+                                                            ft_dev_text,
+                                                            device,
+                                                            "mpnet",
+                                                            event)
+    
+    print(AL_SPLIT_SET.format(event, al_isel, "labeled", labeled_size, set_id))
+    ft_mt_training_step = torch.concat([ft_train_images, ft_train_text], axis=1)
+    
+    ft_dev = torch.concat([ft_dev_images, ft_dev_text], axis=1)
+    
+    ft_mt_training_step = check_and_convert_to_tensor(ft_mt_training_step)
+    annot_mt_training_step = check_and_convert_to_tensor(annot_train)
+    annot_dev = check_and_convert_to_tensor(annot_dev)
+    
+    annot_mt_training_step = torch.argmax(annot_mt_training_step, dim=1)
+    annot_dev = torch.argmax(annot_dev, dim=1)
+
+    # train
+    emb = ft_mt_training_step
+    lbl = annot_mt_training_step
+
+    edges = graph_edges(emb, n_neigh_train)
+
+    pyg_graph_train = Data(x=emb, edge_index=edges, y=lbl)
+
+    labeled_ix, unlabeled_ix, pseudo_train_ix, pseudo_val_ix = data_split(pyg_graph_train, **kwargs)
+    qtde_emb = emb.shape[0]
+
+    labeled_mask = torch.zeros(qtde_emb, dtype=bool)
+    labeled_mask[labeled_ix] = 1
+    pyg_graph_train.labeled_mask = labeled_mask
+
+    unlabeled_mask = torch.zeros(qtde_emb, dtype=bool)
+    unlabeled_mask[unlabeled_ix] = 1
+    pyg_graph_train.unlbl_mask = unlabeled_mask
+
+    pseudo_train = torch.zeros(qtde_emb, dtype=bool)
+    pseudo_train[pseudo_train_ix] = 1
+    pyg_graph_train.pseudo_train_mask = pseudo_train
+
+    pseudo_val = torch.zeros(qtde_emb, dtype=bool)
+    print(pseudo_val_ix)
+    pseudo_val[pseudo_val_ix] = 1
+    pyg_graph_train.pseudo_val_mask = pseudo_val
+
+    # dev
+    ft_mt_dev_step = torch.concat([ft_mt_training_step, ft_dev])
+    annot_mt_dev_step = torch.concat([annot_mt_training_step, annot_dev])
+
+    emb = ft_mt_dev_step
+    lbl = annot_mt_dev_step
+
+    qtde_emb = emb.shape[0]
+
+    edges = graph_edges(emb, n_neigh_full)
+
+    pyg_graph_dev = Data(x=emb, edge_index=edges, y=lbl)
+
+    labeled_mask = torch.zeros(qtde_emb, dtype=bool)
+    labeled_mask[labeled_ix] = 1
+    pyg_graph_dev.labeled_mask = labeled_mask
+
+    unlabeled_mask = torch.zeros(qtde_emb, dtype=bool)
+    unlabeled_mask[unlabeled_ix] = 1
+    pyg_graph_dev.unlbl_mask = unlabeled_mask
+
+    pseudo_train = torch.zeros(qtde_emb, dtype=bool)
+    pseudo_train[pseudo_train_ix] = 1
+    pyg_graph_dev.pseudo_train_mask = pseudo_train
+
+    pseudo_val = torch.zeros(qtde_emb, dtype=bool)
+    pseudo_val[pseudo_val_ix] = 1
+    pyg_graph_dev.pseudo_val_mask = torch.zeros(qtde_emb, dtype=bool)
+
+    test_mask = torch.ones(qtde_emb, dtype=bool)
+    test_mask[pyg_graph_dev.labeled_mask] = 0
+    test_mask[pyg_graph_dev.unlbl_mask] = 0
+    pyg_graph_dev.test_mask = test_mask
+
+    with open(filepath, "wb") as fp:
+        pickle.dump([pyg_graph_train, pyg_graph_dev], fp)     
+    
+    return pyg_graph_train, pyg_graph_dev
+
+
+def generate_graph_old(emb, lbl, n_neighbors, **kwargs):
 
     qtde_emb = emb.shape[0]
 
@@ -78,19 +266,31 @@ def train_step(model, data, **kwargs):
         out_full = model(data.x, data.edge_index, data.edge_attr)
     else:
         out_full = model(data.x, data.edge_index)
-    out = out_full[data.train_mask]
+    out = out_full[data.pseudo_train_mask]
         
     if len(out.shape) == 3 and out.shape[1] == 1:
         out = out.squeeze()
     
     if loss_func == 'nll':
-        res = data.y[data.train_mask].long()
-            
+        res = data.y[data.pseudo_train_mask].long()
+
         loss = F.nll_loss(out, res)
+    
+    elif loss_func == "nll_balanced":
+        res = data.y[data.pseudo_train_mask].long()
+        
+        class_counts = torch.bincount(res)
+
+        total_samples = len(res)
+        class_weights = torch.Tensor([total_samples / (class_counts[i] * len(class_counts)) for i in range(len(class_counts))])
+
+        class_weights = class_weights.to(res.device)
+
+        loss = F.nll_loss(out, res, weight=class_weights)
         
     elif loss_func == 'bce':
         res = torch.zeros_like(out)
-        res[range(out.shape[0]), data.y[data.train_mask].long()] = 1
+        res[range(out.shape[0]), data.y[data.pseudo_train_mask].long()] = 1
 
         loss = torch.nn.BCEWithpredsLoss()(out, res)
     
@@ -100,7 +300,7 @@ def train_step(model, data, **kwargs):
         l2_norm = sum(p.pow(2.0).sum()
                   for p in model.parameters())
  
-        loss = loss + l2_lambda * l2_norm
+        loss = loss + float(l2_lambda) * l2_norm
 
     loss.backward()
     optimizer.step()
@@ -118,11 +318,11 @@ def eval_data(model, data, test=False, train_val=False, result_file=None, **kwar
         preds = torch.logsumexp(preds, dim=1) - math.log(preds.shape[1])
 
     if train_val:
-        mask_train = data.train_mask
+        mask_train = data.pseudo_train_mask
         pred_train = preds[mask_train].max(1)[1]
         f1_train = get_f1(data.y[mask_train], pred_train)
     
-        mask_val = data.val_mask
+        mask_val = data.pseudo_val_mask
         pred_val = preds[mask_val].max(1)[1]
         f1_val = get_f1(data.y[mask_val], pred_val)
     else:
@@ -157,7 +357,6 @@ def eval_data(model, data, test=False, train_val=False, result_file=None, **kwar
             with open(result_file, "w") as fp:
                 json.dump(results, fp, indent=4, default=custom_serializer)
 
-
             # Plot the confusion matrix using seaborn
             plt.figure(figsize=(5, 5))
             sns.heatmap(confm, annot=True, fmt='d', cmap='Blues', cbar=False)
@@ -184,27 +383,6 @@ def run_base(model, pyg_graph, **kwargs):
     best_score = 0
 
     epochs = kwargs.get('epochs')
-    lbl_train_frac = kwargs.get('lbl_train_frac')
-
-    labeled_ix = torch.argwhere(pyg_graph.labeled_mask).squeeze()
-    if lbl_train_frac < 1:
-    # split annotated data
-        labeled_ix = labeled_ix.clone().to('cpu')
-        lbl_train_ix, lbl_val_ix = train_test_split(labeled_ix, 
-                                                train_size=lbl_train_frac,
-                                                stratify=y[labeled_ix],
-                                                random_state=0)
-        
-        pyg_graph.train_mask = torch.zeros(n, dtype=bool)
-        pyg_graph.train_mask[lbl_train_ix] = True
-        pyg_graph.val_mask = torch.zeros(n, dtype=bool)
-        pyg_graph.val_mask[lbl_val_ix] = True
-    elif lbl_train_frac == 1:
-        pyg_graph.train_mask = torch.zeros(n, dtype=bool)
-        pyg_graph.train_mask[labeled_ix] = True
-        pyg_graph.val_mask = torch.zeros(n, dtype=bool)
-        pyg_graph.val_mask[labeled_ix] = True
-
 
     model.train()
 
@@ -222,7 +400,10 @@ def run_base(model, pyg_graph, **kwargs):
             if kwargs.get("best_model_metric") == "best_val":
                 epoch_score = val_f1
             elif kwargs.get("best_model_metric") == "best_hm":
-                epoch_score = statistics.harmonic_mean([train_f1, val_f1])
+                if train_f1 > 0 and val_f1 > 0:
+                    epoch_score = statistics.harmonic_mean([train_f1, val_f1])
+                else:
+                    epoch_score = 0
 
             if epoch_score > best_score:
                 best_model = copy.deepcopy(model)
@@ -257,7 +438,6 @@ def run_base(model, pyg_graph, **kwargs):
         print(f"Early stopping at epoch {epoch}. Validation loss did not improve.")
     elif epoch_score == 1:
         print(f"Early stopping at epoch {epoch}. Metric for best model equals to 1")
-
     
     return best_model
 
@@ -274,5 +454,6 @@ def validate_best_model(best_model, pyg_graph_test, result_file=None, **kwargs):
         print(f'Labeled F1: {100 * labeled_f1:.2f}%, '
             f'Unlabeled F1: {100 * unlabeled_f1:.2f}% '
             f'Test F1: {100 * test_f1:.2f}%')
+        print("---------------------")
 
     return test_f1
