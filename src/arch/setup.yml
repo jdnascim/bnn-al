@@ -101,3 +101,52 @@ bayesian_gnn:
   group: gnn
   num_test_inference_run: 10
   num_inference_run: 100
+
+bayesian_mlp:
+  input_dim: 512
+  hidden_dim: 1024
+  output_dim: 2
+  n_hidden: 1
+  epochs: 500
+  lr: 1e-5
+  weight_decay: 0.01
+  dropout: 0.5
+  batch_size: 32
+  num_workers: 4
+  n_neigh_train: 16
+  n_neigh_full: 16
+  lbl_train_frac: 0.8
+  sample: false
+  loss: "nll_balanced"
+  best_model_metric: "best_hm"
+  dataset: "CrisisMMD"
+  imageft: "maxvit"
+  textft: "mpnet"
+  fusion: "early"
+  pca_red: 256
+  group: mlp
+
+bayesian_hybrid:
+  input_dim: 512
+  hidden_dim: 1024
+  output_dim: 2
+  n_hidden: 1
+  epochs: 500
+  lr: 1e-5
+  weight_decay: 0.01
+  dropout: 0.5
+  batch_size: 32
+  num_workers: 4
+  n_neigh_train: 16
+  n_neigh_full: 16
+  lbl_train_frac: 0.8
+  sample: false
+  loss: "nll_balanced"
+  best_model_metric: "best_hm"
+  dataset: "CrisisMMD"
+  imageft: "maxvit"
+  textft: "mpnet"
+  fusion: "early"
+  pca_red: 256
+  group: hybrid
+  num_test_inference_run: 10

@@ -110,21 +110,21 @@ class BayesianGNN(consistent_mc_dropout.BayesianModule):
         self.conv2.reset_parameters()
         self.fc.reset_parameters()
 
-class BayesianMLP(consistent_mc_dropout.BayesianModule):
+class BayesianHybrid(consistent_mc_dropout.BayesianModule):
     
     def __init__(self):
         super().__init__()
 
-        self.lin1 = nn.Linear(512, 1024)
+        self.conv1 = SAGEConv(512, 1024)
         self.conv1_drop = ConsistentMCDropout()
-        self.lin2 = nn.Linear(1024, 1024)
+        self.lin = nn.Linear(1024, 1024)
         self.conv2_drop = ConsistentMCDropout()
         self.fc = nn.Linear(1024, 2)
 
 
-    def mc_forward_impl(self, x: torch.Tensor):
-        x = F.relu(self.conv1_drop(self.conv1(x), k), 2)
-        x = F.relu(self.conv2_drop(self.conv2(x), k), 2)
+    def mc_forward_impl(self, x: torch.Tensor, edge_index: torch.Tensor, k):
+        x = F.relu(self.conv1_drop(self.conv1(x, edge_index), k), 2)
+        x = F.relu(self.conv2_drop(self.lin(x), k), 2)
         x = self.fc(x)
         x = F.log_softmax(x, dim=1)
 
@@ -142,4 +142,39 @@ class BayesianMLP(consistent_mc_dropout.BayesianModule):
     
     def reset_parameters(self):
         self.conv1.reset_parameters()
-        self.conv2.reset_parameters()
+        self.lin.reset_parameters()
+        self.fc.reset_parameters()
+
+class BayesianMLP(consistent_mc_dropout.BayesianModule):
+    
+    def __init__(self):
+        super().__init__()
+
+        self.lin1 = nn.Linear(512, 1024)
+        self.conv1_drop = ConsistentMCDropout()
+        self.lin2 = nn.Linear(1024, 1024)
+        self.conv2_drop = ConsistentMCDropout()
+        self.fc = nn.Linear(1024, 2)
+
+
+    def mc_forward_impl(self, x: torch.Tensor, k):
+        x = F.relu(self.conv1_drop(self.lin1(x), k), 2)
+        x = F.relu(self.conv2_drop(self.lin2(x), k), 2)
+        x = self.fc(x)
+        x = F.log_softmax(x, dim=1)
+
+        return x
+
+    # Returns B x n x output
+    def forward(self, input_B: torch.Tensor, edge_index: torch.Tensor, k=1):
+        self.k = k
+        
+        mc_input_BK = self.mc_tensor(input_B, self.k)
+        mc_output_BK = self.mc_forward_impl(mc_input_BK, self.k)
+        mc_output_B_K = self.unflatten_tensor(mc_output_BK, self.k)
+
+        return mc_output_B_K
+    
+    def reset_parameters(self):
+        self.lin1.reset_parameters()
+        self.lin2.reset_parameters()

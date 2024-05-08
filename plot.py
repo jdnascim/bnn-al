@@ -5,16 +5,23 @@ import glob
 import os
 from src.utils.constants import EVENTS
 
-EXPS_NUM = np.arange(1,17)
+EXPS_NUM = np.arange(22,25)
 RANDOM_BASE = 0
     #EXPS_LABELS = ["random", "unc", "unc_kmeans", "bald_kmeans", "bald_base"]
-EXPS_LABELS = EXPS_NUM
+EXPS_LABELS = EXPS_NUM.copy().astype(str)
+
+# EXPS_LABELS[0] = "random"
+# EXPS_LABELS[15] = "degree-batchbald-deg"
+# EXPS_LABELS[16] = "degree-bald-deg"
+# EXPS_LABELS[5] = "degree-unc"
+# EXPS_LABELS[17] = "mlp-batchbald-deg"
 
 SAMPLES_NUM = 10
 RUNS_NUM = 5
 RES = "/hahomes/jnascimento/exps/2024-bnn-al/results/{}/al_isel/{}/{}_{}_{}.json"
-X = [18, 34, 50]
-K = 3
+# X = [18, 34, 50]
+X = np.arange(6,51,4)
+K = 5
 
 fig, ax_base = plt.subplots(2,4, figsize=(14,6), dpi=300)
 fig.delaxes(ax_base[1][3])
@@ -48,7 +55,7 @@ std_gen = np.nanstd(res_vec, axis=(1,3,4))
 f1_sum = np.sum(f1_gen, axis=1)
 highest_indices = np.argsort(f1_sum)[-3:]
 
-highest_indices = np.concatenate([highest_indices, [RANDOM_BASE, 15]])
+highest_indices = np.concatenate([highest_indices, [RANDOM_BASE]])
 
 for ixe, e in enumerate(EVENTS):
     plt_x = ixe // 4
@@ -79,7 +86,7 @@ plt.close(fig)
 
 for k in highest_indices:
     plt.plot(X, f1_gen[k], linestyle='-', marker='o', label="{}".format(EXPS_LABELS[k]))
-    print(EXPS_LABELS[k], np.round(f1_sum[k],2), np.round(f1_gen[k], 2), np.round(std_gen[k], 2))
+    print(EXPS_NUM[k], EXPS_LABELS[k], np.round(f1_sum[k],2), np.round(f1_gen[k], 2), np.round(std_gen[k], 2))
 
 plt.title("AL - Mean")
 plt.xticks(X)

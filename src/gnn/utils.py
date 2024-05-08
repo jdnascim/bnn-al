@@ -380,7 +380,7 @@ def run_base(model, pyg_graph, **kwargs):
     y = y.to("cpu")
     
     best_model = None
-    best_score = 0
+    best_score = -1 * torch.inf
 
     epochs = kwargs.get('epochs')
 

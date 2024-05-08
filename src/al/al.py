@@ -1,8 +1,10 @@
+from collections import Counter
+import heapq
 from sklearn.cluster import KMeans
 import torch
 from batchbald_redux import batchbald
 
-from src.utils.gnn import highest_degree_unlbl_nodes
+from src.gnn.utils import highest_degree_unlbl_nodes
 
 def rdn_sel(pyg_graph, al_batch):
     unlbl_ix = torch.where(pyg_graph.unlbl_mask)[0]
