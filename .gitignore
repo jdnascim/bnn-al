@@ -161,7 +161,9 @@ cython_debug/
 
 results/
 baseline/7Set-AL
-data/
+data/.cache
+data/CrisisMMD_v2.0
+data/CrisisMMD_v2.0_baseline_split
 plots/
 BAK/
 src/baseline
