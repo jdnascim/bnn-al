@@ -1,30 +1,29 @@
 #!/bin/bash
 
-train_set_size=$1
-train_set_id=$2
-gpu=$3
-run_id=$4
-dataset=$5
+train_set_id=$1
+gpu=$2
+run_id=$3
+dataset=$4
 
 exp=19
 imagepath=./data/CrisisMMD_v2.0/
 
 cd ../../
 
-python3 train_and_infer_al.py \
+python3 train_and_infer_al_isel.py \
   --exp_id $exp \
-  --exp_group al \
+  --exp_group al_isel \
   --device $gpu \
   --event $dataset \
-  --labeled_size $train_set_size \
+  --labeled_size 18 \
   --set_id $train_set_id \
-  --arch base_gnn_al \
+  --arch bayesian_mlp \
   --run_id $run_id \
   --reduction autoenc \
   --autoenc base_ae \
   --event $dataset \
-  --al unc \
+  --al random \
   --al_iter 2 \
-  --al_batch 20 \
-  --al_isel balanced_random \
-  --aug_unlbl_set
+  --al_batch 16 \
+  --al_isel random \
+  --al_random_pseudo_val \
