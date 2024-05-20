@@ -16,7 +16,9 @@ from src.feature_extraction.img_utils import load_image, check_ext
 from src.feature_extraction.vector_utils import normalize_vector
 import pickle
 import os
-from src.utils.constants import DATAPATH, EVENTS, IMAGEPATH
+from src.utils.constants import DATAPATH, EVENT_SPLIT_JSON, EVENTS, IMAGEPATH
+from transformers import AutoProcessor, CLIPModel, AutoTokenizer
+
 
 class ImageDataset(Dataset):
    
@@ -47,10 +49,18 @@ class ImageDataset(Dataset):
         if self.transform and self.hf_ret_tensors is False:
             image = self.transform(image)
         elif self.transform and self.hf_ret_tensors is True:
-            image = self.transform(image, return_tensors='pt')
+            image = self.transform(images=image, return_tensors='pt')
         return image, img_id
 
-def mpnet_features(gpu, event):
+
+def mpnet_features(event_features=None, **kwargs):
+    dev = kwargs.get("device")
+
+    if event_features is None:
+        event = kwargs.get("event")
+    else:
+        event = event_features
+
     name = 'all-mpnet-base-v2'
 
     filepath = "data/.cache/{}_{}.pkl".format(name, event)
@@ -62,13 +72,8 @@ def mpnet_features(gpu, event):
 
     dfs = [None, None, None]
     
-    if torch.cuda.is_available():
-        dev = "cuda:"+ str(gpu) 
-    else: 
-        dev = "cpu" 
-
     for ix, split in enumerate(("train", "dev", "test")):
-        data = pd.read_json("data/CrisisMMD_v2.0_baseline_split/event_data_splits/{}/{}.jsonl".format(event, split), lines=True)
+        data = pd.read_json(EVENT_SPLIT_JSON.format(event, split), lines=True)
 
         labels = []
         clean_text = [] 
@@ -107,7 +112,14 @@ def mpnet_features(gpu, event):
     return dfs
     
 
-def maxvit_features(gpu, event):
+def maxvit_features(event_features=None, **kwargs):
+    dev = kwargs.get("device")
+
+    if event_features is None:
+        event = kwargs.get("event")
+    else:
+        event = event_features
+
     dfs = [None, None, None]
     name = 'maxvit_tiny_tf_224.in1k'
 
@@ -118,11 +130,6 @@ def maxvit_features(gpu, event):
             dfs = pickle.load(fp)
         return dfs
 
-    if torch.cuda.is_available():
-        dev = "cuda:"+ str(gpu) 
-    else: 
-        dev = "cpu" 
-    
     #embeddings, embeddings_ids  = get_image_embedding(image_files, image_ids, model, m_transform, normalize=True, gpu_id=0, use_gpu=True)
     model = timm.create_model(
         #'maxvit_xlarge_tf_512.in21k_ft_in1k',
@@ -143,7 +150,7 @@ def maxvit_features(gpu, event):
         embedded_vectors = []
         embeddings_ids = []
     
-        data = pd.read_json("data/CrisisMMD_v2.0_baseline_split/event_data_splits/{}/{}.jsonl".format(event, split), lines=True)
+        data = pd.read_json(EVENT_SPLIT_JSON.format(event, split), lines=True)
 
         image_files = []
         text = []
@@ -176,6 +183,110 @@ def maxvit_features(gpu, event):
         image_files = [image_files[i] for i in embeddings_ids]
         embeddings = [embedded_vectors[i] for i in embeddings_ids]
         labels = [labels[i] for i in embeddings_ids]
+
+        labels = [ (1,0) if l == 'not_informative' else (0,1) for l in labels ]
+        labels = np.array(labels)
+    
+        df = pd.DataFrame({"image_files": image_files,
+                            "text": text,
+                            "embeddings": [f for f in embeddings],
+                            "labels": np.argmax(labels, axis=1)})
+    
+        dfs[ix] = df
+
+    
+    with open(filepath, "wb") as fp:
+        pickle.dump(dfs, fp)     
+
+    return dfs
+
+
+def clip_features(mode="image", event_features=None, **kwargs):
+    dev = kwargs.get("device")
+
+    if event_features is None:
+        event = kwargs.get("event")
+    else:
+        event = event_features
+
+    assert mode == "image" or mode == "text", "mode should be image or text"
+
+    dfs = [None, None, None]
+
+    filepath = "data/.cache/clip_{}_{}.pkl".format(mode, event)
+
+    if os.path.exists(filepath):
+        with open(filepath, 'rb') as fp:
+            dfs = pickle.load(fp)
+        return dfs
+
+    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+    model.to(dev)
+    if mode == "image":
+        processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        batch_size = 128
+    elif mode == "text":
+        tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+    
+
+    for ix, split in enumerate(("train", "dev", "test")):
+        embedded_vectors = []
+        embeddings_ids = []
+    
+        data = pd.read_json(EVENT_SPLIT_JSON.format(event, split), lines=True)
+
+        image_files = []
+        text = []
+        labels = []
+        clean_text = []
+        
+        for _, row in tqdm.tqdm(data.iterrows()):
+            image_files.append(join(IMAGEPATH, row['image']))
+            text.append(row['text'])
+            
+            if mode == "text":
+                clean_text.append(pre_process(row['text'], keep_hashtag = True, keep_special_symbols = True))
+            # Applie Preprocess stage here
+            labels.append(row['label']) 
+        
+        image_ids = [i for i in range(len(image_files))]
+
+        full_ft = torch.zeros([len(image_files), 512])
+        batch_ix = 0
+        
+        if mode == "image":
+            img_dataset = ImageDataset(image_files, image_ids, processor, hf_ret_tensors=True)
+            img_dataloader = DataLoader(img_dataset, batch_size=batch_size, shuffle=False)
+        
+            for imgs, ids_batch in tqdm.tqdm(img_dataloader, total=np.ceil(len(img_dataset) / batch_size).astype(int)):
+                imgs = imgs.to(dev)
+
+                with torch.no_grad():
+                    imgs.data["pixel_values"] = imgs.data["pixel_values"].squeeze()
+                    image_features = model.get_image_features(**imgs)
+                    
+                # Append features and image IDs
+                ini = batch_size * batch_ix
+                end = min(batch_size * (batch_ix+1), len(image_files))
+                full_ft[ini:end] = image_features
+                embeddings_ids.extend(ids_batch)
+                batch_ix += 1
+            
+            embedded_vectors = full_ft.detach().cpu().numpy()
+        
+            image_files = [image_files[i] for i in embeddings_ids]
+            embeddings = [embedded_vectors[i] for i in embeddings_ids]
+            labels = [labels[i] for i in embeddings_ids]
+
+        elif mode == "text":
+            inputs = tokenizer(clean_text, return_tensors="pt", padding="max_length", 
+                               max_length=tokenizer.model_max_length, truncation=True)
+            inputs.to(dev)
+            
+            with torch.no_grad():
+                embeddings = model.get_text_features(**inputs)  
+                
+            embeddings = embeddings.detach().cpu().numpy()
 
         labels = [ (1,0) if l == 'not_informative' else (0,1) for l in labels ]
         labels = np.array(labels)

@@ -3,7 +3,8 @@ import copy
 from datetime import datetime
 
 from sklearn.model_selection import train_test_split
-from src.al.al import bald_base, bald_deg_sel, bald_kmeans, bald_sel, batchbald_deg_sel, batchbald_sel, rdn_sel, unc_kmeans_sel, unc_sel
+from src.arch.utils import read_setup
+from src.al.al import al_update
 from src.gnn.utils import run_base, generate_graph, validate_best_model
 import torch
 import os
@@ -11,10 +12,13 @@ import torch.nn.functional as F
 from src.arch.bnn import BayesianGNN, BayesianHybrid, BayesianMLP
 from src.arch.base import BaseMLP
 from tqdm.auto import trange
-from src.utils.constants import DEV_SET, RESULT_FILE, SETUP_FILE, AL_SPLIT_SET, TRAIN_SET
+from src.utils.constants import DEV_SET, RESULT_FILE, SETUP_FILE, AL_SPLIT_SET, TRAIN_SET, WANDB_NAME
 from src.utils.utils import seed_everything
 import yaml
 import numpy as np
+
+import wandb
+wandb.login()
 
 
 start_time = datetime.now()
@@ -36,7 +40,7 @@ parser.add_argument("--pca_red", default=256, type=int, required=False)
 parser.add_argument("--al", default=None, type=str, required=False)
 parser.add_argument("--al_iter", default=3, type=int)
 parser.add_argument("--al_batch", default=10, type=int)
-parser.add_argument("--al_isel", default="random", type=str, required=False, choices=["random", "kmeans", "degree"])
+parser.add_argument("--al_isel", default="random", type=str, required=False)
 parser.add_argument("--aug_unlbl_set", action="store_true", default=False)
 parser.add_argument("--al_random_pseudo_val", action="store_true", default=False)
 parser.add_argument("--retrain", action="store_true", default=False)
@@ -63,8 +67,10 @@ al_isel = args.al_isel
 
 if args.aug_unlbl_set:
     aug_unlbl_set = True
+    kwargs.update({"aug_unlbl_set": True})
 else:
     aug_unlbl_set = False
+    kwargs.update({"aug_unlbl_set": False})
 
 if args.retrain:
     retrain = True
@@ -81,48 +87,45 @@ if args.arch_setup is not None:
 else:
     arch_setup = arch
 
-with open(SETUP_FILE, "r") as yaml_file:
-    arch_setup_data = yaml.safe_load(yaml_file)[arch_setup]
+arch_setup_data = read_setup(arch_setup)
 
 kwargs.update(arch_setup_data)
 
-input_dim = arch_setup_data["input_dim"]
-hidden_dim = arch_setup_data["hidden_dim"]
-n_hidden= arch_setup_data["n_hidden"]
-output_dim = arch_setup_data["output_dim"]
+wandb.init(
+    # Set the project where this run will be logged
+    project="bnn-al", 
+    # We pass a run name (otherwise it’ll be randomly assigned, like sunshine-lollypop-10)
+    name = WANDB_NAME.format(exp_id, event, labeled_size, set_id, run_id),
+    # Track hyperparameters and run metadata
+    config=kwargs
+    )
 
-lbl_train_frac = arch_setup_data["lbl_train_frac"]
-print(lbl_train_frac)
+kwargs.update({"wandb": wandb})
 
 if dev_id is not None:
     device = torch.device('cuda:{}'.format(dev_id) if torch.cuda.is_available() else 'cpu')
 else:
     device = 'cpu'
 
+kwargs.update({"device": device})
+
 use_gpu = device != 'cpu'
 
 seed_everything(set_id)
 
 if arch_setup_data["group"] == "mlp":
-    model = BayesianMLP()
+    model = BayesianMLP(**kwargs)
 elif arch_setup_data["group"] == "gnn":
-    model = BayesianGNN()
+    model = BayesianGNN(**kwargs)
 elif arch_setup_data["group"] == "hybrid":
-    model = BayesianHybrid()
+    model = BayesianHybrid(**kwargs)
 
+print(kwargs)
 model = model.to(device)
 
 pyg_graph_train, pyg_graph_dev = generate_graph(**kwargs)
 pyg_graph_train = pyg_graph_train.to(device)
 pyg_graph_dev = pyg_graph_dev.to(device)
-
-print("instance selection - train")
-print("ix: ", torch.arange(pyg_graph_train.x.shape[0], device=device)[pyg_graph_train.pseudo_train_mask])
-print("y: ", pyg_graph_train.y[pyg_graph_train.pseudo_train_mask])
-print("instance selection - val")
-print("ix: ", torch.arange(pyg_graph_train.x.shape[0], device=device)[pyg_graph_train.pseudo_val_mask])
-print("y: ", pyg_graph_train.y[pyg_graph_train.pseudo_val_mask])
-print(torch.unique(pyg_graph_train.y, return_counts=True))
 
 for i in range(args.al_iter + 1):
     
@@ -138,75 +141,12 @@ for i in range(args.al_iter + 1):
         print("AL Iteration: {} of {}".format(i+1, al_iter))
         model = best_model
 
-        if random_pseudo_val:
-            al_batch_pseudo_train = int(al_batch * lbl_train_frac)
-            al_batch_pseudo_val = al_batch - al_batch_pseudo_train
-        else:
-            al_batch_pseudo_train = al_batch
+        pyg_graph_train, pyg_graph_dev = al_update(model, pyg_graph_train, pyg_graph_dev, **kwargs)
+
+        labeled_size += al_batch
             
-        if al == "random":
-            selected_indices = rdn_sel(pyg_graph_train, al_batch_pseudo_train)
-            
-        elif al == "unc":
-            selected_indices = unc_sel(model, pyg_graph_train, al_batch_pseudo_train)
-            
-        elif al == "unc-kmeans":
-            selected_indices = unc_kmeans_sel(model, pyg_graph_train, al_batch_pseudo_train)
-
-        elif al == "bald-base":
-            selected_indices = bald_base(model, pyg_graph_train, al_batch_pseudo_train, bald_iter=al_batch_pseudo_train)
-            
-        elif al == "bald-kmeans":
-            selected_indices = bald_kmeans(model, pyg_graph_train, al_batch_pseudo_train, bald_iter=al_batch_pseudo_train)
-        
-        elif al == "batchbald":
-            selected_indices = batchbald_sel(model, pyg_graph_train, al_batch_pseudo_train, device, bald_iter=al_batch_pseudo_train)
-            selected_indices = selected_indices.squeeze()
-
-        elif al == "bald":
-            selected_indices = bald_sel(model, pyg_graph_train, al_batch_pseudo_train, device, bald_iter=al_batch_pseudo_train)
-            selected_indices = selected_indices.squeeze()
-
-        elif al == "batchbald-degree":
-            selected_indices = batchbald_deg_sel(model, pyg_graph_train, al_batch_pseudo_train, device, bald_iter=al_batch_pseudo_train)
-            selected_indices = selected_indices.squeeze()
-
-        elif al == "bald-degree":
-            selected_indices = bald_deg_sel(model, pyg_graph_train, al_batch_pseudo_train, device, bald_iter=al_batch_pseudo_train)
-            selected_indices = selected_indices.squeeze()
-
-        pyg_graph_train.labeled_mask[selected_indices] = True
-        pyg_graph_train.unlbl_mask[selected_indices] = False
-        pyg_graph_dev.labeled_mask[selected_indices] = True
-        pyg_graph_dev.unlbl_mask[selected_indices] = False
-
-        if random_pseudo_val:
-            selected_indices_pseudo_val = rdn_sel(pyg_graph_train, al_batch_pseudo_val)
-            pyg_graph_train.pseudo_train_mask[selected_indices] = True
-            pyg_graph_train.pseudo_val_mask[selected_indices_pseudo_val] = True
-            pyg_graph_train.labeled_mask[selected_indices_pseudo_val] = True
-            pyg_graph_train.unlbl_mask[selected_indices_pseudo_val] = False
-            pyg_graph_dev.pseudo_train_mask[selected_indices] = True
-            pyg_graph_dev.pseudo_val_mask[selected_indices_pseudo_val] = True
-            pyg_graph_dev.labeled_mask[selected_indices_pseudo_val] = True
-            pyg_graph_dev.unlbl_mask[selected_indices_pseudo_val] = False
-
-            labeled_size += len(selected_indices) + len(selected_indices_pseudo_val)
-        else:
-            pseudo_train, pseudo_val = train_test_split(selected_indices, train_size=lbl_train_frac, random_state=set_id)
-            pyg_graph_train.pseudo_train_mask[pseudo_train] = True
-            pyg_graph_train.pseudo_val_mask[pseudo_val] = True
-            pyg_graph_dev.pseudo_train_mask[pseudo_train] = True
-            pyg_graph_dev.pseudo_val_mask[pseudo_val] = True
-
-            labeled_size += len(selected_indices)
-            
-        print("new train set")
-        print("ix: ", torch.arange(pyg_graph_train.x.shape[0], device=device)[pyg_graph_train.pseudo_train_mask])
-        print("y: ", pyg_graph_train.y[pyg_graph_train.pseudo_train_mask])
-        print("new val set")
-        print("ix: ", torch.arange(pyg_graph_train.x.shape[0], device=device)[pyg_graph_train.pseudo_val_mask])
-        print("y: ", pyg_graph_train.y[pyg_graph_train.pseudo_val_mask])
-    
     if retrain is True:
         model.reset_parameters()
+
+# Mark the run as finished
+wandb.finish()

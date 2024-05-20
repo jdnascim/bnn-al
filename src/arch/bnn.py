@@ -77,14 +77,23 @@ class ConsistentMCDropout(consistent_mc_dropout._ConsistentMCDropout):
 
 class BayesianGNN(consistent_mc_dropout.BayesianModule):
     
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
 
-        self.conv1 = SAGEConv(512, 1024)
+        input_dim = kwargs.get("input_dim")
+        hidden_dim = kwargs.get("hidden_dim")
+        output_dim = kwargs.get("output_dim")
+
+        self.aug_unlbl_set = kwargs.get("aug_unlbl_set")
+
+        if self.aug_unlbl_set is True:
+            output_dim += 1
+
+        self.conv1 = SAGEConv(input_dim, hidden_dim)
         self.conv1_drop = ConsistentMCDropout()
-        self.conv2 = SAGEConv(1024, 1024)
+        self.conv2 = SAGEConv(hidden_dim, hidden_dim)
         self.conv2_drop = ConsistentMCDropout()
-        self.fc = nn.Linear(1024, 2)
+        self.fc = nn.Linear(hidden_dim, output_dim)
 
 
     def mc_forward_impl(self, x: torch.Tensor, edge_index: torch.Tensor, k):
@@ -103,6 +112,11 @@ class BayesianGNN(consistent_mc_dropout.BayesianModule):
         mc_output_BK = self.mc_forward_impl(mc_input_BK, edge_index, self.k)
         mc_output_B_K = self.unflatten_tensor(mc_output_BK, self.k)
 
+        if self.aug_unlbl_set is True and self.training is False:
+            positive_column = mc_output_B_K[:, :, 1].unsqueeze(-1)  
+            max_negative = torch.max(mc_output_B_K[:, :, 0], mc_output_B_K[:, :, 2]).unsqueeze(-1)  
+            mc_output_B_K = torch.cat((max_negative, positive_column), dim=2)  
+
         return mc_output_B_K
     
     def reset_parameters(self):
@@ -112,14 +126,23 @@ class BayesianGNN(consistent_mc_dropout.BayesianModule):
 
 class BayesianHybrid(consistent_mc_dropout.BayesianModule):
     
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
 
-        self.conv1 = SAGEConv(512, 1024)
+        input_dim = kwargs.get("input_dim")
+        hidden_dim = kwargs.get("hidden_dim")
+        output_dim = kwargs.get("output_dim")
+
+        self.aug_unlbl_set = kwargs.get("aug_unlbl_set")
+
+        if self.aug_unlbl_set is True:
+            output_dim += 1
+
+        self.conv1 = SAGEConv(input_dim, hidden_dim)
         self.conv1_drop = ConsistentMCDropout()
-        self.lin = nn.Linear(1024, 1024)
+        self.lin = nn.Linear(hidden_dim, hidden_dim)
         self.conv2_drop = ConsistentMCDropout()
-        self.fc = nn.Linear(1024, 2)
+        self.fc = nn.Linear(hidden_dim, output_dim)
 
 
     def mc_forward_impl(self, x: torch.Tensor, edge_index: torch.Tensor, k):
@@ -137,6 +160,11 @@ class BayesianHybrid(consistent_mc_dropout.BayesianModule):
         mc_input_BK = self.mc_tensor(input_B, self.k)
         mc_output_BK = self.mc_forward_impl(mc_input_BK, edge_index, self.k)
         mc_output_B_K = self.unflatten_tensor(mc_output_BK, self.k)
+    
+        if self.aug_unlbl_set is True and self.training is False:
+            positive_column = mc_output_B_K[:, :, 1].unsqueeze(-1)  
+            max_negative = torch.max(mc_output_B_K[:, :, 0], mc_output_B_K[:, :, 2]).unsqueeze(-1)  
+            mc_output_B_K = torch.cat((max_negative, positive_column), dim=2)  
 
         return mc_output_B_K
     
@@ -147,14 +175,23 @@ class BayesianHybrid(consistent_mc_dropout.BayesianModule):
 
 class BayesianMLP(consistent_mc_dropout.BayesianModule):
     
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
 
-        self.lin1 = nn.Linear(512, 1024)
+        input_dim = kwargs.get("input_dim")
+        hidden_dim = kwargs.get("hidden_dim")
+        output_dim = kwargs.get("output_dim")
+        
+        self.aug_unlbl_set = kwargs.get("aug_unlbl_set")
+
+        if self.aug_unlbl_set is True:
+            output_dim += 1
+
+        self.lin1 = nn.Linear(input_dim, hidden_dim)
         self.conv1_drop = ConsistentMCDropout()
-        self.lin2 = nn.Linear(1024, 1024)
+        self.lin2 = nn.Linear(hidden_dim, hidden_dim)
         self.conv2_drop = ConsistentMCDropout()
-        self.fc = nn.Linear(1024, 2)
+        self.fc = nn.Linear(hidden_dim, output_dim)
 
 
     def mc_forward_impl(self, x: torch.Tensor, k):
@@ -172,6 +209,11 @@ class BayesianMLP(consistent_mc_dropout.BayesianModule):
         mc_input_BK = self.mc_tensor(input_B, self.k)
         mc_output_BK = self.mc_forward_impl(mc_input_BK, self.k)
         mc_output_B_K = self.unflatten_tensor(mc_output_BK, self.k)
+        
+        if self.aug_unlbl_set is True and self.training is False:
+            positive_column = mc_output_B_K[:, :, 1].unsqueeze(-1)  
+            max_negative = torch.max(mc_output_B_K[:, :, 0], mc_output_B_K[:, :, 2]).unsqueeze(-1)  
+            mc_output_B_K = torch.cat((max_negative, positive_column), dim=2)  
 
         return mc_output_B_K
     

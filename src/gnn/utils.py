@@ -16,10 +16,12 @@ import matplotlib.pyplot as plt
 import math
 import pandas as pd
 from torch_geometric.utils import degree
+import igraph as ig
 
-from src.feature_extraction.feature_extraction import mpnet_features, maxvit_features
-from src.utils.utils import check_and_convert_to_tensor, custom_serializer, data_split, get_f1, get_normalized_acc, process_dataframe
-from src.utils.constants import AL_SPLIT_SET, DEV_SET, GRAPH_CACHE, TRAIN_SET
+from src.al.isel import data_split
+from src.feature_extraction.feature_extraction import clip_features, mpnet_features, maxvit_features
+from src.utils.utils import check_and_convert_to_tensor, custom_serializer, get_f1, get_normalized_acc, process_dataframe
+from src.utils.constants import AL_SPLIT_SET, AUG_GRAPH_CACHE, DEV_SET, GRAPH_CACHE, TRAIN_SET, EVENT_AUG_PAIRS
 from src.utils.reduction import autoencoder_reduction
 
 
@@ -46,7 +48,7 @@ def highest_degree_unlbl_nodes(pyg_graph, k):
     
 
 
-def graph_edges(emb, n_neighbors):
+def graph_edges(emb, n_neighbors, mode="knn", max_sim_iter=100):
 
     if torch.is_tensor(emb) is True:
         device = emb.device
@@ -56,29 +58,125 @@ def graph_edges(emb, n_neighbors):
     emb = torch.Tensor(emb).to(device)
 
     simm[np.arange(simm.shape[0]),np.arange(simm.shape[0])] = 0
-    
-    edges = set()        
-    for i, vec in enumerate(simm):
-        partit = np.argpartition(vec, -1*n_neighbors)
-        for j in range(n_neighbors):
-            edges.add((i, partit[-1 * j]))
-            edges.add((partit[-1 * j], i))
+
+    if mode == "knn":
+        edges = set()        
+        for i, vec in enumerate(simm):
+            partit = np.argpartition(vec, -1*n_neighbors)
+            for j in range(n_neighbors):
+                edges.add((i, partit[-1 * j]))
+                edges.add((partit[-1 * j], i))
+            
+        edges = torch.Tensor(list(edges)).t().type(torch.int64)
+    elif mode == "sim":
+        num_nodes = simm.shape[0]
+        # Initialize graph with empty edges
         
-    edges = torch.Tensor(list(edges)).t().type(torch.int64)
-    
+        max_threshold = np.amax(simm, axis=1).max()
+
+        # threshold = (max_threshold + min_threshold) / 2
+        threshold = max_threshold
+        scaler = 0.1
+
+        # Set flag to keep iterating until mean degree reaches k
+        ix = 0
+        while True:
+            graph = ig.Graph(n=num_nodes)
+            # Threshold the similarity matrix
+            adjacency_matrix = simm > threshold
+            
+            # Convert adjacency matrix to list of edges
+            edges_ix = np.transpose(np.where(adjacency_matrix))
+            
+            # Update graph with edges
+            graph.add_edges(edges_ix)
+            
+            # Calculate mean degree
+            mean_degree = np.mean(graph.degree())
+            
+            #Check if mean degree is close to k
+            if abs(mean_degree - n_neighbors) < 0.1 or ix >= max_sim_iter:  # Adjust tolerance as needed
+                break
+            elif mean_degree < n_neighbors:  # If mean degree is less than k, decrease threshold
+                threshold -= scaler
+                # threshold = (min_threshold + threshold) / 2
+            else:  # If mean degree is greater than k, increase threshold
+                threshold += scaler
+                scaler *= 0.1
+                threshold -= scaler
+                # threshold = (max_threshold + threshold) / 2
+
+            ix += 1
+        
+        # Convert igraph edges to torch_geometric edges
+        edges = np.array(graph.get_edgelist()).T
+        edges = torch.tensor(edges, dtype=torch.long)
+
+    elif mode == "sim-connected":
+        num_nodes = simm.shape[0]
+        # Initialize graph with empty edges
+        
+        max_threshold = np.amax(simm, axis=1).max()
+        min_threshold = np.sort(simm, axis=1)[:, ::-1][:, 1].min()
+
+        threshold = min_threshold
+        scaler = 0.1
+
+        # Set flag to keep iterating until mean degree reaches k
+        ix = 0
+        while True:
+            graph = ig.Graph(n=num_nodes)
+            # Threshold the similarity matrix
+            adjacency_matrix = simm > threshold
+            
+            # Convert adjacency matrix to list of edges
+            edges_ix = np.transpose(np.where(adjacency_matrix))
+            
+            # Update graph with edges
+            graph.add_edges(edges_ix)
+            
+            # Calculate mean degree
+            mean_degree = np.mean(graph.degree())
+            
+            #Check if mean degree is close to k
+            if abs(mean_degree - n_neighbors) < 0.1 or ix >= max_sim_iter:  # Adjust tolerance as needed
+                break
+            elif threshold == min_threshold and mean_degree > n_neighbors:
+                break
+            elif mean_degree < n_neighbors:  # If mean degree is less than k, decrease threshold
+                threshold = (min_threshold + threshold) / 2
+            else:  # If mean degree is greater than k, increase threshold
+                threshold = (max_threshold + threshold) / 2
+
+            ix += 1
+
+        # Convert igraph edges to torch_geometric edges
+        edges = np.array(graph.get_edgelist()).T
+        edges = torch.tensor(edges, dtype=torch.long)
+        
     return edges
     
 
 def generate_graph(**kwargs):
     event = kwargs.get("event")
-    dev_id = kwargs.get("device")
     reduction = kwargs.get("reduction")
     al_isel = kwargs.get("al_isel")
     labeled_size = kwargs.get("labeled_size")
     set_id = kwargs.get("set_id")
     cache = kwargs.get("use_cache")
+    n_neigh_train = kwargs.get("n_neigh_train")
+    n_neigh_full = kwargs.get("n_neigh_full")
+    graph_mode = kwargs.get("graph_mode")
+    imageft = kwargs.get("imageft")
+    textft = kwargs.get("textft")
+    aug_unlbl_set = kwargs.get("aug_unlbl_set")
+    device = kwargs.get("device")
 
-    filepath = GRAPH_CACHE.format(event, reduction, al_isel, labeled_size, set_id)
+    if aug_unlbl_set is True:
+        aug_event = EVENT_AUG_PAIRS[event]
+        filepath = AUG_GRAPH_CACHE.format(event, aug_event, imageft, textft, reduction, graph_mode, al_isel, n_neigh_train, n_neigh_full, labeled_size, set_id)
+    else:
+        filepath = GRAPH_CACHE.format(event, imageft, textft, reduction, graph_mode, al_isel, n_neigh_train, n_neigh_full, labeled_size, set_id)
 
     if os.path.exists(filepath) and cache:
         with open(filepath, 'rb') as fp:
@@ -86,39 +184,63 @@ def generate_graph(**kwargs):
 
             return pyg_graph_train, pyg_graph_dev
 
-    n_neigh_train = kwargs.get("n_neigh_train")
-    n_neigh_full = kwargs.get("n_neigh_full")
+    if textft == "mpnet":
+        [df_text_train, df_text_dev, _] = mpnet_features(**kwargs)
+    elif textft == "clip":
+        [df_text_train, df_text_dev, _] = clip_features(mode="text", **kwargs)
 
-    if dev_id is not None:
-        device = torch.device('cuda:{}'.format(dev_id) if torch.cuda.is_available() else 'cpu')
-    else:
-        device = 'cpu'
-    
-    [df_text_train, df_text_dev, _] = mpnet_features(dev_id, event)
-    [df_image_train, df_image_dev, _] = maxvit_features(dev_id, event)
-    
-    
+    if imageft == "maxvit":
+        [df_image_train, df_image_dev, _] = maxvit_features(**kwargs)
+    elif textft == "clip":
+        [df_image_train, df_image_dev, _] = clip_features(mode="image", **kwargs)
+
     data_train = pd.read_json(TRAIN_SET.format(event), lines=True)
-    ft_images_train, ft_text_train, annot_train = process_dataframe(data_train,
-                                                    df_image_train,
-                                                    df_text_train)
-    
+    ft_train_images, ft_train_text, annot_train = process_dataframe(data_train,
+                                                                    df_image_train,
+                                                                    df_text_train)
+
     # dev
     data_dev = pd.read_json(DEV_SET.format(event), lines=True)
     ft_dev_images, ft_dev_text, annot_dev = process_dataframe(data_dev, df_image_dev, df_text_dev)
+
+    if aug_unlbl_set is True:
+        aug_event = EVENT_AUG_PAIRS[event]
+        if textft == "mpnet":
+            [df_text_aug, _, _] = mpnet_features(event_features=aug_event, **kwargs)
+        elif textft == "clip":
+            [df_text_aug, _, _] = clip_features(event_features=aug_event, mode="text", **kwargs)
+    
+        if imageft == "maxvit":
+            [df_image_aug, _, _] = maxvit_features(event_features=aug_event, **kwargs)
+        elif textft == "clip":
+            [df_image_aug, _, _] = clip_features(event_features=aug_event, mode="image", **kwargs)
+
+        df_image_aug["labels"] = 2
+        df_text_aug["labels"] = 2
+
+        data_aug = pd.read_json(TRAIN_SET.format(aug_event), lines=True)
+        ft_aug_images, ft_aug_text, annot_aug = process_dataframe(data_aug, df_image_aug, df_text_aug)
+
+        annot_train = np.column_stack([annot_train, np.zeros(annot_train.shape[0])])
+        annot_aug = np.zeros_like(annot_aug)
+        annot_aug = np.column_stack([annot_aug, np.ones(annot_aug.shape[0])])
+
+        ft_train_images = torch.concat([ft_train_images, ft_aug_images])
+        ft_train_text = torch.concat([ft_train_text, ft_aug_text])
+        annot_train = np.concatenate([annot_train, annot_aug])
     
     if reduction == "autoenc":
         autoenc = kwargs.get("autoenc")
 
         ft_train_images, ft_dev_images = autoencoder_reduction(autoenc,
-                                                                ft_images_train,
+                                                                ft_train_images,
                                                                 ft_dev_images,
                                                                 device,
                                                                 "maxvit",
                                                                 event)
         
         ft_train_text, ft_dev_text = autoencoder_reduction(autoenc,
-                                                            ft_text_train,
+                                                            ft_train_text,
                                                             ft_dev_text,
                                                             device,
                                                             "mpnet",
@@ -140,7 +262,7 @@ def generate_graph(**kwargs):
     emb = ft_mt_training_step
     lbl = annot_mt_training_step
 
-    edges = graph_edges(emb, n_neigh_train)
+    edges = graph_edges(emb, n_neigh_train, graph_mode)
 
     pyg_graph_train = Data(x=emb, edge_index=edges, y=lbl)
 
@@ -160,9 +282,12 @@ def generate_graph(**kwargs):
     pyg_graph_train.pseudo_train_mask = pseudo_train
 
     pseudo_val = torch.zeros(qtde_emb, dtype=bool)
-    print(pseudo_val_ix)
     pseudo_val[pseudo_val_ix] = 1
     pyg_graph_train.pseudo_val_mask = pseudo_val
+
+    aug_event_mask = torch.ones(qtde_emb, dtype=bool)
+    aug_event_mask[((pyg_graph_train.y == 0) | (pyg_graph_train.y == 1))] = 0
+    pyg_graph_train.aug_event_mask = aug_event_mask
 
     # dev
     ft_mt_dev_step = torch.concat([ft_mt_training_step, ft_dev])
@@ -173,7 +298,7 @@ def generate_graph(**kwargs):
 
     qtde_emb = emb.shape[0]
 
-    edges = graph_edges(emb, n_neigh_full)
+    edges = graph_edges(emb, n_neigh_full, graph_mode)
 
     pyg_graph_dev = Data(x=emb, edge_index=edges, y=lbl)
 
@@ -193,64 +318,28 @@ def generate_graph(**kwargs):
     pseudo_val[pseudo_val_ix] = 1
     pyg_graph_dev.pseudo_val_mask = torch.zeros(qtde_emb, dtype=bool)
 
+    aug_event_mask = torch.zeros(qtde_emb, dtype=bool)
+    aug_event_mask[((pyg_graph_dev.y != 0) & (pyg_graph_dev.y != 1))] = 1
+    pyg_graph_dev.aug_event_mask = aug_event_mask
+
     test_mask = torch.ones(qtde_emb, dtype=bool)
     test_mask[pyg_graph_dev.labeled_mask] = 0
     test_mask[pyg_graph_dev.unlbl_mask] = 0
+    test_mask[pyg_graph_dev.aug_event_mask] = 0
     pyg_graph_dev.test_mask = test_mask
 
     with open(filepath, "wb") as fp:
+        pyg_graph_dev.to("cpu")
+        pyg_graph_train.to("cpu")
+
         pickle.dump([pyg_graph_train, pyg_graph_dev], fp)     
+
+        pyg_graph_dev.to(device)
+        pyg_graph_train.to(device)
     
     return pyg_graph_train, pyg_graph_dev
 
 
-def generate_graph_old(emb, lbl, n_neighbors, **kwargs):
-
-    qtde_emb = emb.shape[0]
-
-    if torch.is_tensor(emb) is True:
-        device = emb.device
-        emb = emb.detach().cpu().numpy()
-    
-    simm = cosine_similarity(emb)
-    emb = torch.Tensor(emb).to(device)
-
-    simm[np.arange(simm.shape[0]),np.arange(simm.shape[0])] = 0
-    
-    edges = set()        
-    for i, vec in enumerate(simm):
-        partit = np.argpartition(vec, -1*n_neighbors)
-        for j in range(n_neighbors):
-            edges.add((i, partit[-1 * j]))
-            edges.add((partit[-1 * j], i))
-        
-    edges = torch.Tensor(list(edges)).t().type(torch.int64)
-
-    pyg_graph = Data(x=emb, edge_index=edges, y=lbl)
-
-    if kwargs.get("labeled_ix") is not None:
-        labeled_mask = torch.zeros(qtde_emb, dtype=bool)
-        labeled_mask[kwargs.get("labeled_ix")] = 1
-        pyg_graph.labeled_mask = labeled_mask
-
-    if kwargs.get("unlabeled_ix") is not None:
-        unlabeled_mask = torch.zeros(qtde_emb, dtype=bool)
-        unlabeled_mask[kwargs.get("unlabeled_ix")] = 1
-        pyg_graph.unlbl_mask = unlabeled_mask
-
-    if kwargs.get("test_ix") is not None:
-        test_mask = torch.zeros(qtde_emb, dtype=bool)
-        test_mask[kwargs.get("test_ix")] = 1
-        pyg_graph.test_mask = test_mask
-    
-    if kwargs.get("event_unlbl_ix") is not None:
-        event_unlbl_mask = torch.zeros(qtde_emb, dtype=bool)
-        event_unlbl_mask[kwargs.get("event_unlbl_ix")] = 1
-        pyg_graph.event_unlbl_mask = event_unlbl_mask
-    
-    return pyg_graph
-
-    
 def train_step(model, data, **kwargs):
 
     model.train()
@@ -266,18 +355,18 @@ def train_step(model, data, **kwargs):
         out_full = model(data.x, data.edge_index, data.edge_attr)
     else:
         out_full = model(data.x, data.edge_index)
-    out = out_full[data.pseudo_train_mask]
+    out = out_full[(data.pseudo_train_mask) | (data.aug_event_mask)]
         
     if len(out.shape) == 3 and out.shape[1] == 1:
         out = out.squeeze()
     
     if loss_func == 'nll':
-        res = data.y[data.pseudo_train_mask].long()
+        res = data.y[(data.pseudo_train_mask) | (data.aug_event_mask)].long()
 
         loss = F.nll_loss(out, res)
     
     elif loss_func == "nll_balanced":
-        res = data.y[data.pseudo_train_mask].long()
+        res = data.y[(data.pseudo_train_mask) | (data.aug_event_mask)].long()
         
         class_counts = torch.bincount(res)
 
@@ -310,9 +399,12 @@ def train_step(model, data, **kwargs):
 
 @torch.no_grad()
 def eval_data(model, data, test=False, train_val=False, result_file=None, **kwargs):
+    aug_unlbl_set = kwargs.get("aug_unlbl_set")
+
     model.eval()
 
     preds = model(data.x, data.edge_index, kwargs.get("num_test_inference_run"))
+
 
     if len(preds.shape) == 3:
         preds = torch.logsumexp(preds, dim=1) - math.log(preds.shape[1])
@@ -364,6 +456,9 @@ def eval_data(model, data, test=False, train_val=False, result_file=None, **kwar
             plt.ylabel('True')
             plt.title('Confusion Matrix')
             plt.savefig(result_file.replace(".json", ".png"))
+        
+        # log_post_table(torch.where(mask_test == True)[0], pred_test, 
+        #                data.y[mask_test], preds[mask_test], **kwargs)
 
         return f1_labeled, f1_unlbl, f1_test
     elif train_val == True :
@@ -385,6 +480,8 @@ def run_base(model, pyg_graph, **kwargs):
     epochs = kwargs.get('epochs')
 
     model.train()
+
+    wandb = kwargs.get("wandb")
 
     with tqdm.trange(epochs, unit="epoch", mininterval=0, position=0, leave=True ) as bar:
         epoch = 0
@@ -409,7 +506,6 @@ def run_base(model, pyg_graph, **kwargs):
                 best_model = copy.deepcopy(model)
                 best_score = epoch_score
                 best_epoch = epoch
-                best_preds = preds
                 
                 early_stopping_counter = 0 
             else:
@@ -422,6 +518,11 @@ def run_base(model, pyg_graph, **kwargs):
                 f1_train=train_f1,
                 f1_val=val_f1
             )
+
+                  # 🐝 2️⃣ Log metrics from your script to W&B
+            # wandb.log({"f1_train": train_f1,
+            #                          "f1_val": val_f1, 
+            #                          "loss": loss})
 
             epoch += 1
 
@@ -446,7 +547,13 @@ def validate_best_model(best_model, pyg_graph_test, result_file=None, **kwargs):
     display = True
     print(result_file)
 
+    wandb = kwargs.get('wandb')
+
     labeled_f1, unlabeled_f1, test_f1 = eval_data(best_model, pyg_graph_test, test=True, result_file=result_file, **kwargs)
+
+    wandb.summary["labeled_f1"] = labeled_f1
+    wandb.summary["unlabeled_f1"] = unlabeled_f1
+    wandb.summary["test_f1"] = test_f1
 
     if display is True:
         print("---------------------")
@@ -457,3 +564,13 @@ def validate_best_model(best_model, pyg_graph_test, result_file=None, **kwargs):
         print("---------------------")
 
     return test_f1
+
+def log_post_table(id_post, predicted, labels, probs, **kwargs):
+    wandb = kwargs.get("wandb")
+
+    "Log a wandb.Table with (img, pred, target, scores)"
+    # 🐝 Create a wandb Table to log images, labels and predictions to
+    table = wandb.Table(columns=["image", "pred", "target"]+[f"score_{i}" for i in range(10)])
+    for ix, pred, targ, prob in zip(id_post.to("cpu"), predicted.to("cpu"), labels.to("cpu"), probs.to("cpu")):
+        table.add_data(wandb.Image(ix, pred, targ, *prob.numpy()))
+    wandb.log({"predictions_table":table}, commit=False)

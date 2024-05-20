@@ -131,7 +131,11 @@ def autoencoder_reduction(arch_name, full_ft, ft_dev, device, ft_source, event):
     ft_dev = enc(torch.Tensor(ft_dev).to(device)).detach().float()
 
     with open(filepath, "wb") as fp:
+        full_ft.to("cpu")
+        ft_dev.to("cpu")
         pickle.dump([full_ft, ft_dev], fp)     
+        full_ft.to(device)
+        ft_dev.to(device)
 
     return full_ft, ft_dev
 
