@@ -5,7 +5,7 @@ gpu=$2
 run_id=$3
 dataset=$4
 
-exp=1
+exp=24
 imagepath=./data/CrisisMMD_v2.0/
 
 cd ../../
@@ -15,13 +15,13 @@ python3 train_and_infer_al_isel.py \
   --exp_group al_isel \
   --device $gpu \
   --event $dataset \
-  --labeled_size 18 \
+  --labeled_size 6 \
   --set_id $train_set_id \
-  --arch bayesian_gnn \
+  --arch bayesian_mlp \
   --run_id $run_id \
   --event $dataset \
   --al random \
-  --al_iter 2 \
-  --al_batch 16 \
+  --al_iter 11 \
+  --al_batch 4 \
   --al_isel random \
   --al_random_pseudo_val \

@@ -19,10 +19,11 @@ for i in {0..9}; do
         exp_count=$((start_offset + ct));
         echo $exp_count of $qtde_experiments;
         ct=$((ct + 1));
-        if [[ ! -f "../../results/${dataset}/al_is/${exp}/18_${i}_${id_run}.json" ]] || \
-            [[ ! -f "../../results/${dataset}/al_is/${exp}/34_${i}_${id_run}.json" ]] || \
-            [[ ! -f "../../results/${dataset}/al_is/${exp}/50_${i}_${id_run}.json" ]]; then
-            bash exp_$exp.sh $i $gpu $id_run $dataset
+        if [[ (! -f "../../results/${dataset}/al_isel/${exp}/18_${i}_${id_run}.json") || \
+            (! -f "../../results/${dataset}/al_isel/${exp}/34_${i}_${id_run}.json") || \
+            (! -f "../../results/${dataset}/al_isel/${exp}/50_${i}_${id_run}.json") ]] && \
+            [[ ! -f "../../results/${dataset}/al_isel/${exp}/450_${i}_${id_run}.json" ]]; then
+                bash exp_$exp.sh $i $gpu $id_run $dataset
         fi
     fi
 done

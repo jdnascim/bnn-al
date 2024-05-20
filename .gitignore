@@ -174,3 +174,9 @@ artifacts/glove.840B.300d
 sentence-transformers_all-mpnet-base-v2
 src/res_pred
 src/ftlib/**/features
+wandb
+models--sentence-transformers--all-mpnet-base-v2
+notebooks
+move.py
+wand_test.py
+scripts/**/tmux_multiple_gpus.sh

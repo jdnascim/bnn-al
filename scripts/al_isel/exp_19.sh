@@ -19,8 +19,6 @@ python3 train_and_infer_al_isel.py \
   --set_id $train_set_id \
   --arch bayesian_mlp \
   --run_id $run_id \
-  --reduction autoenc \
-  --autoenc base_ae \
   --event $dataset \
   --al random \
   --al_iter 2 \
