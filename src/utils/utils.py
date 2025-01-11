@@ -53,6 +53,14 @@ def check_and_convert_to_tensor(var):
         return torch.Tensor(var)
     return var
 
+def tensor_to_numpy(input_data):
+    if isinstance(input_data, torch.Tensor):
+        return input_data.detach().cpu().numpy()
+    elif isinstance(input_data, np.ndarray):
+        return input_data
+    else:
+        raise TypeError("Input must be a PyTorch tensor or a NumPy array")
+
 
 def process_dataframe(data, df_image, df_text):
     df_image = df_image.set_index(['image_files','text'])
@@ -64,6 +72,8 @@ def process_dataframe(data, df_image, df_text):
     image_files = []
     texts = []
     annotations = []
+    annotations_image = []
+    annotations_text = []
     for _, row in tqdm.tqdm(data.iterrows()):
         image_files.append(join(IMAGEPATH, row['image']))
         # Apply Preprocess stage here
@@ -72,9 +82,15 @@ def process_dataframe(data, df_image, df_text):
         texts.append(row['text'])
 
         annotations.append(row['label'])
+        annotations_image.append(row['label_image'])
+        annotations_text.append(row['label_text'])
 
     annotations = [(1, 0) if l == 'not_informative' else (0, 1) for l in annotations]
     annotations = np.array(annotations)
+    annotations_image = [(1, 0) if l == 'not_informative' else (0, 1) for l in annotations_image]
+    annotations_image = np.array(annotations_image)
+    annotations_text = [(1, 0) if l == 'not_informative' else (0, 1) for l in annotations_text]
+    annotations_text = np.array(annotations_text)
 
     ft_images = torch.zeros([len(data), len(df_image["embeddings"].iloc[0])])
     for ix, (img, txt) in enumerate(zip(image_files, texts)):
@@ -83,7 +99,7 @@ def process_dataframe(data, df_image, df_text):
     for ix, (img, txt) in enumerate(zip(image_files, texts)):
         ft_text[ix] = torch.Tensor(df_text_dict[(img, txt)]["embeddings"])
     
-    return ft_images, ft_text, annotations
+    return ft_images, ft_text, annotations, annotations_image, annotations_text
 
     
 def data_split_old(ft, labeled_size, set_id, isel="random"):
@@ -102,3 +118,38 @@ def custom_serializer(obj):
         return ' '.join(str(x) for x in obj)
     else:
         return obj
+
+
+def remove_duplicates(A):
+    # Convert A to a list of tuples to facilitate finding unique rows
+    A_list = [tuple(row) for row in A.tolist()]
+    
+    # Get unique rows and their original indices
+    unique_rows, indices = torch.unique(torch.tensor(A_list, dtype=torch.float64), dim=0, return_inverse=True)
+    
+    # Convert unique_rows back to a tensor
+    B = unique_rows
+    
+    # Create the indicator matrix C
+    n = A.size(0)
+    k = B.size(0)
+    C = torch.zeros((k, n), dtype=torch.int)
+    
+    for i in range(n):
+        C[indices[i], i] = 1
+    
+    return B, C 
+
+def save_to_csv(degree_report, csv_file):
+    # Convert the dictionary to a DataFrame
+    df = pd.DataFrame([degree_report])
+
+    # Check if the CSV file already exists
+    file_exists = os.path.isfile(csv_file)
+
+    # Append or create the CSV file
+    mode = 'a' if file_exists else 'w'
+    header = not file_exists if mode == 'a' else True  # Append without header if file exists
+
+    # Save to CSV
+    df.to_csv(csv_file, mode=mode, header=header, index=False)

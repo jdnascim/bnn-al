@@ -21,3 +21,13 @@ EVENT_AUG_PAIRS = {
     "hurricane_maria": "srilanka_floods",
     "srilanka_floods": "california_wildfires"
 }
+EVENT_AUG_DIFF = {
+    "california_wildfires": ["hurricane_harvey", "hurricane_irma", "hurricane_maria", "iraq_iran_earthquake", "mexico_earthquake", "srilanka_floods"],
+    "hurricane_harvey": ["california_wildfires", "iraq_iran_earthquake", "mexico_earthquake", "srilanka_floods"],
+    "iraq_iran_earthquake": ["california_wildfires", "hurricane_harvey", "hurricane_irma", "hurricane_maria", "srilanka_floods"],
+    "hurricane_irma": ["california_wildfires", "iraq_iran_earthquake", "mexico_earthquake", "srilanka_floods"],
+    "mexico_earthquake": ["california_wildfires", "hurricane_harvey", "hurricane_irma", "hurricane_maria", "srilanka_floods"],
+    "hurricane_maria": ["california_wildfires", "iraq_iran_earthquake", "mexico_earthquake", "srilanka_floods"],
+    "srilanka_floods": ["california_wildfires", "hurricane_harvey", "hurricane_irma", "hurricane_maria", "iraq_iran_earthquake", "mexico_earthquake"]
+}
+DEGREE_CSV = "results/{}/{}/degrees.csv"

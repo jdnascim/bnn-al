@@ -7,86 +7,96 @@ from torch_geometric.nn import SAGEConv
 
 
 class BaseMLP(torch.nn.Module):
-    def __init__(self, input_size, output_size, hidden_size, n_hidden_layers, linear=True, dropout=0.5):
+    def __init__(self, **kwargs):
         super(BaseMLP, self).__init__()
 
-        self.linear = linear
+        input_dim = kwargs.get("input_dim")
+        hidden_dim = kwargs.get("hidden_dim")
+        output_dim = kwargs.get("output_dim")
 
-        layers_size = []
-        layers_size.append(input_size)
-        for i in range(n_hidden_layers):
-            layers_size.append(hidden_size)
-        layers_size.append(output_size)
+        self.aug_unlbl_set = kwargs.get("aug_unlbl_set")
+        self.dataset_loss = kwargs.get("dataset_loss")
+        self.dropout = kwargs.get("dropout")
 
-        self.layers = torch.nn.ModuleList()
-
-        for i in range(len(layers_size)-1):
-            if i < len(layers_size) - 2:
-                self.layers.append(nn.Linear(layers_size[i], layers_size[i+1]))
+        if self.aug_unlbl_set is not None:
+            if self.dataset_loss is True:
+                output_dim += 2
             else:
-                self.layers.append(nn.Linear(layers_size[i], layers_size[i+1]))
-            
-        self.dropout = dropout
+                output_dim += 1
 
-    def forward(self, x):
+        self.conv1 = nn.Linear(input_dim, hidden_dim)
+        self.conv2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x, edge_index=None, num_inference=None):
         x = x.float()
 
-        for l in self.layers:
-            x = l(x)
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = self.fc(x)
 
-            x = F.relu(x)
-            x = F.dropout(x, p=self.dropout, training=self.training)
+        if self.aug_unlbl_set is not None and self.dataset_loss is True:
+            x[:, :2] = F.log_softmax(x[:, :2], dim=1)
+            x[:, 2:] = F.log_softmax(x[:, 2:], dim=1)
+        else:
+            x = F.log_softmax(x, dim=1)
 
-        return F.log_softmax(x, dim=1)
+        if self.aug_unlbl_set is not None and self.training is False:
+            positive_column = x[:, 1].unsqueeze(-1)  
+            max_negative = torch.max(x[:, 0], x[:, 2]).unsqueeze(-1)  
+            x = torch.cat((max_negative, positive_column), dim=1)  
+
+        return x
     
     def reset_parameters(self):
-        for l in self.layers:
-            l.reset_parameters()
+        self.conv1.reset_parameters()
+        self.conv2.reset_parameters()
+        self.fc.reset_parameters()
 
 
 class BaseGNN(torch.nn.Module):
-    def __init__(self, input_size, output_size, hidden_size, n_hidden_layers, linear=True, dropout=0.5):
+    def __init__(self, **kwargs):
         super(BaseGNN, self).__init__()
 
-        self.linear = linear
+        input_dim = kwargs.get("input_dim")
+        hidden_dim = kwargs.get("hidden_dim")
+        output_dim = kwargs.get("output_dim")
 
-        layers_size = []
-        layers_size.append(input_size)
-        for i in range(n_hidden_layers+1):
-            layers_size.append(hidden_size)
-        layers_size.append(output_size)
+        self.aug_unlbl_set = kwargs.get("aug_unlbl_set")
+        self.dataset_loss = kwargs.get("dataset_loss")
+        self.dropout = kwargs.get("dropout")
 
-        self.layers = torch.nn.ModuleList()
-
-        for i in range(len(layers_size)-1):
-            if i < len(layers_size) - 2:
-                self.layers.append(SAGEConv(layers_size[i], layers_size[i+1]))
+        if self.aug_unlbl_set is not None:
+            if self.dataset_loss is True:
+                output_dim += 2
             else:
-                self.layers.append(nn.Linear(layers_size[i], layers_size[i+1]))
-            
-        self.dropout = dropout
+                output_dim += 1
 
-    def forward(self, x, edge_index=None, dropout_infer=False):
+        self.conv1 = SAGEConv(input_dim, hidden_dim)
+        self.conv2 = SAGEConv(hidden_dim, hidden_dim)
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x, edge_index=None, num_inference=None):
         x = x.float()
 
-        qtde_layers = len(self.layers)
+        x = F.relu(self.conv1(x, edge_index))
+        x = F.relu(self.conv2(x, edge_index))
+        x = self.fc(x)
 
-        dropout_flag = (self.training or dropout_infer)
-        for ix, l in enumerate(self.layers):
+        if self.aug_unlbl_set is not None and self.dataset_loss is True:
+            x[:, :2] = F.log_softmax(x[:, :2], dim=1)
+            x[:, 2:] = F.log_softmax(x[:, 2:], dim=1)
+        else:
+            x = F.log_softmax(x, dim=1)
 
-            if ix < len(self.layers) - 1:
-                x = l(x, edge_index)
-    
-                x = F.relu(x)
-                x = F.dropout(x, p=self.dropout, training=dropout_flag)
-            elif self.linear is False:
-                x = l(x, edge_index)
-            else:
-                x = l(x)
-                
+        if self.aug_unlbl_set is not None and self.training is False:
+            positive_column = x[:, 1].unsqueeze(-1)  
+            max_negative = torch.max(x[:, 0], x[:, 2]).unsqueeze(-1)  
+            x = torch.cat((max_negative, positive_column), dim=1)  
 
-        return F.log_softmax(x, dim=1)
+        return x
     
     def reset_parameters(self):
-        for l in self.layers:
-            l.reset_parameters()
+        self.conv1.reset_parameters()
+        self.conv2.reset_parameters()
+        self.fc.reset_parameters()

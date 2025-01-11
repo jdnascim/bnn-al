@@ -143,7 +143,7 @@ def maxvit_features(event_features=None, **kwargs):
     # get model specific transforms (normalization, resize)
     data_config = timm.data.resolve_model_data_config(model)
     transforms_model = timm.data.create_transform(**data_config, is_training=False)
-    batch_size = 128
+    batch_size = 32
     
 
     for ix, split in enumerate(("train", "dev", "test")):
@@ -201,7 +201,7 @@ def maxvit_features(event_features=None, **kwargs):
     return dfs
 
 
-def clip_features(mode="image", event_features=None, **kwargs):
+def clip_features(mode="image", event_features=None, cache_features=False, **kwargs):
     dev = kwargs.get("device")
 
     if event_features is None:
@@ -209,13 +209,20 @@ def clip_features(mode="image", event_features=None, **kwargs):
     else:
         event = event_features
 
+    if cache_features is True:
+        cache = True
+    else:
+        cache = kwargs.get("use_cache")
+
     assert mode == "image" or mode == "text", "mode should be image or text"
+
+    # os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
     dfs = [None, None, None]
 
     filepath = "data/.cache/clip_{}_{}.pkl".format(mode, event)
 
-    if os.path.exists(filepath):
+    if os.path.exists(filepath) and cache:
         with open(filepath, 'rb') as fp:
             dfs = pickle.load(fp)
         return dfs
@@ -224,7 +231,7 @@ def clip_features(mode="image", event_features=None, **kwargs):
     model.to(dev)
     if mode == "image":
         processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
-        batch_size = 128
+        batch_size = 32
     elif mode == "text":
         tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
     
@@ -256,7 +263,7 @@ def clip_features(mode="image", event_features=None, **kwargs):
         
         if mode == "image":
             img_dataset = ImageDataset(image_files, image_ids, processor, hf_ret_tensors=True)
-            img_dataloader = DataLoader(img_dataset, batch_size=batch_size, shuffle=False)
+            img_dataloader = DataLoader(img_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
         
             for imgs, ids_batch in tqdm.tqdm(img_dataloader, total=np.ceil(len(img_dataset) / batch_size).astype(int)):
                 imgs = imgs.to(dev)

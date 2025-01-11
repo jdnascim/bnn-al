@@ -25,6 +25,8 @@ bayesian_gnn:
   group: gnn
   num_test_inference_run: 10
   num_inference_run: 100
+  hetero: false
+  single_modal_loss: false
 
 bayesian_gnn_clip:
   base: bayesian_gnn
@@ -57,3 +59,48 @@ bayesian_mlp_clip:
 bayesian_hybrid_clip:
   base: bayesian_gnn_clip
   group: hybrid
+
+bayesian_mlp_clip_double:
+  base: bayesian_mlp_clip
+  hidden_dim: 4096
+  output_dim: 2
+
+bayesian_mlp_clip_4x:
+  base: bayesian_mlp_clip
+  hidden_dim: 8192
+  output_dim: 2
+
+base_ae:
+  input_dim: 512
+  hidden_dim: [256]
+  norm: true
+  dropout: 0.5
+  epochs: 2000
+
+bayesian_hetero_gnn:
+  base: bayesian_gnn_clip
+  hetero: true
+
+bayesian_hetero_gnn_sml_late:
+  base: bayesian_hetero_gnn
+  single_modal_loss: late
+
+bayesian_hetero_gnn_sml_middle:
+  base: bayesian_hetero_gnn
+  single_modal_loss: middle
+
+bayesian_gnn_clip_20:
+  base: bayesian_gnn_clip
+  num_test_inference_run: 20
+
+bayesian_gnn_clip_15:
+  base: bayesian_gnn_clip
+  num_test_inference_run: 15
+
+base_gnn:
+  base: bayesian_gnn_clip
+  group: gnn-base
+
+base_mlp:
+  base: bayesian_gnn_clip
+  group: mlp-base
