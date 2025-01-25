@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from src.arch.bnn import BayesianGNN, BayesianHeteroGNN, BayesianHybrid, BayesianMLP
 from src.arch.base import BaseGNN, BaseMLP
 from tqdm.auto import trange
-from src.utils.constants import DEV_SET, RESULT_FILE, SETUP_FILE, AL_SPLIT_SET, TRAIN_SET, WANDB_NAME
+from src.utils.constants import DEV_SET, RESULT_FILE, SETUP_FILE, AL_SPLIT_SET, TRAIN_SET
 from src.utils.utils import seed_everything
 import yaml
 import numpy as np
@@ -47,7 +47,6 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_loss", action="store_true", default=False)
     parser.add_argument("--retrain", action="store_true", default=False)
     parser.add_argument("--use-cache", action="store_true", default=False)
-    parser.add_argument("--wandb", action="store_true", default=False)
     parser.add_argument("--epoch_ten", action="store_true", default=False)
     parser.add_argument("--pl", default=None, type=str, required=False)
     parser.add_argument("--pl_batch", default=16, type=int)
@@ -81,11 +80,6 @@ if __name__ == "__main__":
     else:
         random_pseudo_val = False
     
-    if args.wandb:
-        wandb_flag = True
-    else:
-        wandb_flag = False
-    
     if args.arch_setup is not None:
         arch_setup = args.arch_setup
     else:
@@ -99,22 +93,6 @@ if __name__ == "__main__":
     
     if args.epoch_ten:
         kwargs.update({'epochs': 10})
-    
-    kwargs.update({"wand_flag": wandb_flag})
-    if wandb_flag:
-        import wandb
-        wandb.login()
-    
-        wandb.init(
-            # Set the project where this run will be logged
-            project="bnn-al", 
-            # We pass a run name (otherwise it’ll be randomly assigned, like sunshine-lollypop-10)
-            name = WANDB_NAME.format(exp_id, event, labeled_size, set_id, run_id),
-            # Track hyperparameters and run metadata
-            config=kwargs
-            )
-        
-        kwargs.update({"wandb": wandb})
     
     if dev_id is not None:
         device = torch.device('cuda:{}'.format(dev_id) if torch.cuda.is_available() else 'cpu')
@@ -189,8 +167,3 @@ if __name__ == "__main__":
                 
         if retrain is True:
             model.reset_parameters()
-    
-    
-    if wandb_flag:
-        # Mark the run as finished
-        wandb.finish()

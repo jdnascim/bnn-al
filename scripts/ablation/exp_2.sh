@@ -5,20 +5,26 @@ gpu=$2
 run_id=$3
 dataset=$4
 
-exp=37
+exp=2
 imagepath=./data/CrisisMMD_v2.0/
 
 cd ../../
 
+export CUDA_VISIBLE_DEVICES=$gpu 
 python3 train_and_infer_al_isel.py \
   --exp_id $exp \
   --exp_group al_isel \
-  --device $gpu \
+  --device 0 \
   --event $dataset \
-  --labeled_size 450 \
+  --labeled_size 18 \
   --set_id $train_set_id \
   --arch bayesian_gnn_clip \
   --run_id $run_id \
   --event $dataset \
-  --al_iter 0 \
+  --al random \
+  --al_iter 2 \
+  --al_batch 16 \
   --al_isel random \
+  --al_random_pseudo_val \
+  --threshold_cluster 16 \
+  --pl bald-kmeans-aug 

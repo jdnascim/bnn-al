@@ -923,8 +923,6 @@ def run_base(model, pyg_graph, **kwargs):
 
     model.train()
 
-    wandb = kwargs.get("wandb")
-
     with tqdm.trange(epochs, unit="epoch", mininterval=0, position=0, leave=True ) as bar:
         epoch = 0
         best_epoch = -1
@@ -961,11 +959,6 @@ def run_base(model, pyg_graph, **kwargs):
                 f1_val=val_f1
             )
 
-                  # 🐝 2️⃣ Log metrics from your script to W&B
-            # wandb.log({"f1_train": train_f1,
-            #                          "f1_val": val_f1, 
-            #                          "loss": loss})
-
             epoch += 1
 
             if epoch == epochs:
@@ -990,12 +983,6 @@ def validate_best_model(best_model, pyg_graph_test, result_file=None, **kwargs):
     print(result_file)
 
     labeled_f1, unlabeled_f1, test_f1 = eval_data(best_model, pyg_graph_test, test=True, result_file=result_file, **kwargs)
-
-    if kwargs.get("wandb_flag"):
-        wandb = kwargs.get('wandb')
-        wandb.summary["labeled_f1"] = labeled_f1
-        wandb.summary["unlabeled_f1"] = unlabeled_f1
-        wandb.summary["test_f1"] = test_f1
 
     if display is True:
         print("---------------------")

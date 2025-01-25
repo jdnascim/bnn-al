@@ -306,6 +306,7 @@ def clip_features(mode="image", event_features=None, cache_features=False, **kwa
         dfs[ix] = df
 
     
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) 
     with open(filepath, "wb") as fp:
         pickle.dump(dfs, fp)     
 
