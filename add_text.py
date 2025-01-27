@@ -32,9 +32,9 @@ for e in tqdm.tqdm(EVENTS):
                 continue
 
 # Step 2: Process each JSONL file in the target directory
-for filepath in tqdm.tqdm(glob.glob("data/CrisisMMD_v2.0_baseline_split/event_data_splits_w_text/*/*.jsonl")):
+for filepath in tqdm.tqdm(glob.glob("data/CrisisMMD_v2.0_baseline_split/event_data_splits/*/*.jsonl")):
     # Temporary output file to write updated JSONL content
-    temp_filepath = filepath.replace("w_text", "") + ".tmp"
+    temp_filepath = filepath + ".tmp"
 
     with open(filepath, 'r') as infile, open(temp_filepath, 'w') as outfile:
         for line in infile:

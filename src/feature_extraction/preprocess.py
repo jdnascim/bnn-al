@@ -1,8 +1,22 @@
 import re
 import emoji
+from emoji.tokenizer import EmojiMatch, tokenize
+
+def emoji_list(string):
+    """
+    Returns the location and emoji in list of dict format.
+        >>> emoji.emoji_list("Hi, I am fine. 😁")
+        [{'match_start': 15, 'match_end': 16, 'emoji': '😁'}]
+    """
+
+    return [{
+        'match_start': m.value.start,
+        'match_end': m.value.end,
+        'emoji': m.value.emoji,
+    } for m in tokenize(string, keep_zwj=False) if isinstance(m.value, EmojiMatch)]
 
 def remove_emoji(text):
-    emoji_info = emoji.emoji_list(text)
+    emoji_info = emoji_list(text)
     
     positions = []
 
