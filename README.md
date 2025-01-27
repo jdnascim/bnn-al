@@ -3,7 +3,7 @@
 This repository contains the official implementation of the paper:
 
 **Interactive Event Sifting using Bayesian Graph Neural Networks**  
-*José Nascimento, Nathan Jacobs, Anderson Rocha*  
+*José Nascimento, Nathan Jacobs and Anderson Rocha*  
 Published in the **2024 IEEE International Workshop on Information Forensics and Security (WIFS)**  
 [📄 IEEE Xplore Link](https://ieeexplore.ieee.org/document/10810718) | [🌐 arXiv Link](https://arxiv.org/abs/2410.05359)
 
