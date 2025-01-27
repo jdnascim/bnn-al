@@ -5,7 +5,7 @@ This repository contains the official implementation of the paper:
 **Interactive Event Sifting using Bayesian Graph Neural Networks**  
 *José Nascimento, Nathan Jacobs, Anderson Rocha*  
 Published in the **2024 IEEE International Workshop on Information Forensics and Security (WIFS)**  
-[📄 IEEE Xplore Link](https://ieeexplore.ieee.org/document/10810718)  
+[📄 IEEE Xplore Link](https://ieeexplore.ieee.org/document/10810718) | [🌐 arXiv Link](https://arxiv.org/abs/2410.05359)
 
 ---
 
@@ -38,7 +38,7 @@ Install the required dependencies using pip:
 pip install -r requirements.txt
 ```
 
-### 📂 Dataset Preparation
+## 📂 Dataset Preparation
 Download and process the dataset splits by running:
 
 ```bash
@@ -47,7 +47,7 @@ bash process.sh
 
 This script automates downloading the datasets and preparing them for training and evaluation.
 
-### 🚀 Running Experiments
+## 🚀 Running Experiments
 Available Scripts
 You can explore two main directories for experiments:
 
@@ -74,11 +74,11 @@ bash exp_2.sh 18 0 1 mexico_earthquake
 
 **mexico_earthquake**: Dataset name to use for the experiment.
 
-### 🧪 Results
+## 🧪 Results
 
 The results of our experiments highlight the efficacy of our Bayesian Graph Neural Network framework. For detailed results and analysis, please refer to the paper.
 
-### 📚 Citation
+## 📚 Citation
 
 If you use this code or our work in your research, please consider citing:
 
@@ -96,18 +96,18 @@ If you use this code or our work in your research, please consider citing:
   }
 ```
 
-### 🤝 Acknowledgments
+## 🤝 Acknowledgments
 
 We thank the McDonnell International Scholars Academy
-at Washington University in St. Louis and the Sao˜
+at Washington University in St. Louis and the São
 Paulo Research Foundation (FAPESP) Horus project (Grant
 #2023/12865-8) for supporting this work.
 
-### 🛡️ License
+## 🛡️ License
 
 This repository is released under the MIT License.
 
-### 📬 Contact
+## 📬 Contact
 
 For any inquiries or questions, please contact:
 
