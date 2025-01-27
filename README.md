@@ -19,48 +19,6 @@ This work introduces a novel Bayesian Graph Neural Network (BGNN) framework for 
 
 ### 1️⃣ Clone the Repository
 ```bash
-git clone https://github.com/your-username/your-repository.git
-cd your-repository
-
-### 2️⃣ Set Up the Environment
-Install the required dependencies using pip:
-
-```bash
-pip install -r requirements.txt
-
-📂 Dataset Preparation
-Download and process the dataset splits by running:
-
-```bash
-bash process.sh
-
-This script automates downloading the datasets and preparing them for training and evaluation.
-
-
-markdown
-Copiar
-Editar
-# Interactive Event Sifting using Bayesian Graph Neural Networks
-
-This repository contains the official implementation of the paper:
-
-**Interactive Event Sifting using Bayesian Graph Neural Networks**  
-*José Nascimento, Nathan Jacobs, Anderson Rocha*  
-Published in the **2024 IEEE International Workshop on Information Forensics and Security (WIFS)**  
-[📄 IEEE Xplore Link](https://ieeexplore.ieee.org/document/10810718)  
-*December 2–5, 2024, Rome, Italy*
-
----
-
-## 📜 Abstract
-This work introduces a novel Bayesian Graph Neural Network (BGNN) framework for interactive event sifting. By leveraging Bayesian inference within a graph-based learning paradigm, the model effectively handles uncertainty in event prediction tasks. The approach was benchmarked on several disaster-related datasets, demonstrating state-of-the-art performance in identifying informative events.
-
----
-
-## 🛠️ Installation
-
-### 1️⃣ Clone the Repository
-```bash
 git clone https://github.com/jdnascim/bnn-al
 cd bnn-al
 
