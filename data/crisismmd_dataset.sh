@@ -7,7 +7,7 @@ URL="https://crisisnlp.qcri.org/data/crisismmd/CrisisMMD_v2.0.tar.gz"
 FILENAME="CrisisMMD_v2.0.tar.gz"
 
 # Define the directory to extract the files
-EXTRACT_DIR="CrisisMMD_v2.0"
+EXTRACT_DIR="./"
 
 # Download the file
 wget "$URL" -O "$FILENAME"
